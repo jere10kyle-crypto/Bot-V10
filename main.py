@@ -1,14 +1,12 @@
-from flask import Flask
+from flask import Flask, render_template
 import threading
 import discord
 from discord.ext import commands
 import os
-import time
-import json
 
 app = Flask(__name__)
 
-# ---------------- DASHBOARD ----------------
+# ---------------- DASHBOARD STATS ----------------
 stats = {
     "messages": 0,
     "joins": 0,
@@ -17,11 +15,7 @@ stats = {
 
 @app.route("/")
 def home():
-    return "Bot is running!"
-
-@app.route("/stats")
-def dashboard():
-    return stats
+    return render_template("index.html", stats=stats)
 
 # ---------------- DISCORD BOT ----------------
 intents = discord.Intents.default()
@@ -29,52 +23,39 @@ intents.message_content = True
 intents.members = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
+tree = bot.tree
 
-# ---------------- DATA ----------------
-banned_words = ["badword1", "badword2"]
+LOG_CHANNEL_ID = int(os.environ.get("LOG_CHANNEL_ID", 0))
 
-user_messages = {}
-user_strikes = {}
+# ---------------- LOGGING (EMBEDS) ----------------
+async def log_event(guild, title, description, color=0x00ffcc):
+    if not LOG_CHANNEL_ID:
+        return
 
-def save_strikes():
-    with open("strikes.json", "w") as f:
-        json.dump(user_strikes, f)
-
-def load_strikes():
-    global user_strikes
-    try:
-        with open("strikes.json", "r") as f:
-            user_strikes = json.load(f)
-    except:
-        user_strikes = {}
-
-load_strikes()
-
-# ---------------- ANTI SPAM ----------------
-def is_spamming(user_id):
-    now = time.time()
-    if user_id not in user_messages:
-        user_messages[user_id] = []
-
-    user_messages[user_id].append(now)
-
-    # keep last 5 seconds
-    user_messages[user_id] = [t for t in user_messages[user_id] if now - t < 5]
-
-    return len(user_messages[user_id]) > 5
+    channel = guild.get_channel(LOG_CHANNEL_ID)
+    if channel:
+        embed = discord.Embed(
+            title=title,
+            description=description,
+            color=color
+        )
+        await channel.send(embed=embed)
 
 # ---------------- EVENTS ----------------
 @bot.event
 async def on_ready():
+    await tree.sync()
     print(f"Logged in as {bot.user}")
 
 @bot.event
 async def on_member_join(member):
     stats["joins"] += 1
+    await log_event(member.guild, "👋 Member Joined", str(member))
 
 @bot.event
 async def on_member_remove(member):
     stats["leaves"] += 1
+    await log_event(member.guild, "👋 Member Left", str(member))
 
 @bot.event
 async def on_message(message):
@@ -82,49 +63,32 @@ async def on_message(message):
         return
 
     stats["messages"] += 1
-
-    content = message.content.lower()
-
-    # WORD FILTER
-    for word in banned_words:
-        if word in content:
-            await message.delete()
-            await warn_user(message.author, message.guild, "Used banned word")
-            return
-
-    # ANTI SPAM
-    if is_spamming(message.author.id):
-        await warn_user(message.author, message.guild, "Spamming detected")
-        return
-
     await bot.process_commands(message)
 
-# ---------------- STRIKE SYSTEM ----------------
-async def warn_user(user, guild, reason):
-    uid = str(user.id)
+# ---------------- SLASH COMMANDS ----------------
 
-    user_strikes[uid] = user_strikes.get(uid, 0) + 1
-    save_strikes()
+@tree.command(name="ping", description="Check bot latency")
+async def ping(interaction: discord.Interaction):
+    await interaction.response.send_message(
+        f"🏓 Pong! {round(bot.latency * 1000)}ms"
+    )
 
-    if user_strikes[uid] >= 3:
-        member = guild.get_member(user.id)
-        if member:
-            await member.ban(reason="3 strikes")
-    else:
-        print(f"Warned {user} - {reason}")
+@tree.command(name="stats", description="Server stats")
+async def stats_cmd(interaction: discord.Interaction):
+    embed = discord.Embed(title="📊 Server Stats", color=0x00ffcc)
+    embed.add_field(name="Messages", value=stats["messages"], inline=False)
+    embed.add_field(name="Joins", value=stats["joins"], inline=False)
+    embed.add_field(name="Leaves", value=stats["leaves"], inline=False)
 
-# ---------------- COMMANDS ----------------
-@bot.command()
-async def strikes(ctx, member: discord.Member):
-    uid = str(member.id)
-    await ctx.send(f"{member} has {user_strikes.get(uid, 0)} strikes")
+    await interaction.response.send_message(embed=embed)
 
-# ---------------- RUN ----------------
+# ---------------- RUN BOT ----------------
 def run_bot():
-    bot.run(os.environ.get("DISCORD_TOKEN"))
+    bot.run(os.environ["DISCORD_TOKEN"])
 
 threading.Thread(target=run_bot).start()
 
+# ---------------- FLASK ----------------
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
