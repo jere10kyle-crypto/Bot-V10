@@ -1,0 +1,13 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Bot Dashboard</title>
+</head>
+<body>
+    <h1>🤖 Bot Dashboard</h1>
+
+    <p>📩 Messages: {{ stats["messages"] }}</p>
+    <p>📥 Joins: {{ stats["joins"] }}</p>
+    <p>📤 Leaves: {{ stats["leaves"] }}</p>
+</body>
+</html>
