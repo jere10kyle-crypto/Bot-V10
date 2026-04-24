@@ -1,3 +1,16 @@
+import json
+def load_words():
+    try:
+        with open("banned_words.json", "r") as f:
+            return json.load(f)
+    except:
+        return []
+
+def save_words(words):
+    with open("banned_words.json", "w") as f:
+        json.dump(words, f)
+
+banned_words = load_words()
 from flask import Flask, render_template
 import threading
 import discord
